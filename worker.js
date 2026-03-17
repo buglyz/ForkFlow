@@ -166,7 +166,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const { pathname, searchParams } = url;
-    const token = env.GITHUB_TOKEN;
+    const token = (env.GITHUB_TOKEN || '').trim();
 
     try {
       // 获取仓库列表
@@ -193,8 +193,13 @@ export default {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
           const msg = data.message || r.statusText;
+          const doc = data.documentation_url ? ` | 文档: ${data.documentation_url}` : '';
           return jsonResponse(
-            { ok: false, message: `获取当前 GitHub 用户失败: ${msg}` },
+            {
+              ok: false,
+              message: `获取当前 GitHub 用户失败: ${msg}`,
+              debug: { status: r.status, githubMessage: data.message, githubDoc: data.documentation_url },
+            },
             { status: 500 }
           );
         }
@@ -202,6 +207,17 @@ export default {
           ok: true,
           login: data.login || '',
           name: data.name || '',
+        });
+      }
+
+      // 自检：确认 Token 是否配置正确（仅返回前后几位，不暴露完整 Token）
+      if (request.method === 'GET' && pathname === '/api/debug-token') {
+        const len = token.length;
+        return jsonResponse({
+          hasToken: !!token,
+          tokenLength: len,
+          tokenPrefix: len ? token.slice(0, 7) : '',
+          tokenSuffix: len > 11 ? token.slice(-4) : '',
         });
       }
 
