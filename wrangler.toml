@@ -1,0 +1,17 @@
+# ForkFlow - Cloudflare Workers 配置
+# KV id 由 GitHub Actions 从 Secret CLOUDFLARE_KV_NAMESPACE_ID 注入，无需改此文件。GITHUB_TOKEN 在 Worker Settings → Variables 里配。
+name = "forkflow"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+account_id = ""
+
+[[kv_namespaces]]
+binding = "REPOS_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# 前端静态资源
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true

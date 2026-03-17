@@ -703,7 +703,14 @@ export default {
         });
       }
 
-      // 未匹配到 API，返回 404（静态文件由 Pages / 其他部分处理）
+      // 未匹配到 API：由静态资源托管前端（同一 Worker 下 / 即页面，/api/* 即接口）
+      if (env.ASSETS) {
+        const assetUrl =
+          pathname === '/' || pathname === ''
+            ? new URL('/index.html', request.url)
+            : url;
+        return env.ASSETS.fetch(new Request(assetUrl, request));
+      }
       return new Response('Not Found', { status: 404 });
     } catch (e) {
       return jsonResponse(

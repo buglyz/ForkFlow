@@ -1,145 +1,74 @@
-# Fork 仓库同步管理（GitHub Fork Sync Dashboard）
+# Fork 仓库同步管理
 
-通过一个简单的 Web 页面，集中管理你所有的 GitHub Fork 仓库：  
-**一键批量同步、智能导入、自动刷新上游信息、清理脏数据**，让 Fork 不再失控。
-
----
-
-## ✨ 功能亮点
-
-- **一键同步 Fork**：支持单仓库同步，也支持一键批量同步所有已配置 Fork，统一用中文提示「当前主分支已是最新」等状态。
-- **一键导入 Fork**：从当前 Token 对应账号中一键导入所有 Fork 仓库，并自动补齐 Fork / 上游的最近时间与最新 commit 信息。
-- **自动刷新与清理脏数据**：后台刷新上游信息，自动移除在 GitHub 上已删除或已取消 Fork 关系的仓库，列表按最近更新时间倒序展示。
-- **智能添加仓库**：`Owner` 可留空，自动解析为当前 GitHub 用户名，添加成功后自动刷新并补齐元信息。
-- **良好交互体验**：统一的确认弹框、可取消的 Loading 弹框、按钮与表格 hover 高亮，让操作状态一目了然。
+Web 页面集中管理 GitHub Fork：**一键批量同步、一键导入 Fork、自动刷新/清理上游信息**。需 Node.js 18+ 与 GitHub Token（`repo` 权限）。
 
 ---
 
-## 前置条件
-
-- Node.js 18+
-- 一个 GitHub Personal Access Token：
-  - 需要 `repo` 权限。
-  - Token 对应账号必须对这些 Fork 仓库有 push 权限。
-
----
-
-## 本地快速开始（Node.js 版本）
-
-### 1. 安装依赖
+## 本地运行
 
 ```bash
 npm install
 ```
 
-### 2. 配置 GitHub Token
-
-在项目根目录创建 `.env` 文件：
-
-```bash
-# 必填：GitHub Personal Access Token（需 repo 权限）
-GITHUB_TOKEN=ghp_xxxxxxxxxxxx
-
-# 可选：服务端口，默认 3846
-PORT=3846
-```
-
-> 生成 Token：  
-> GitHub → Settings → Developer settings → Personal access tokens → Generate new token，勾选 `repo`。
-
-### 3. 启动服务
+在项目根目录创建 `.env`：`GITHUB_TOKEN=ghp_xxx`（可选 `PORT=3846`）。然后：
 
 ```bash
 npm start
 ```
 
-浏览器访问 `http://localhost:3846`，即可使用页面：
-
-1. 点击「添加仓库」：
-   - `Owner` 可留空（默认使用当前 Token 用户名）。
-   - 填写 `Repo` 和分支（默认 `main`）。
-2. 在列表中：
-   - 点击「同步」可对单个仓库执行与上游的合并。
-   - 点击「一键批量同步」可依次同步所有仓库。
-   - 点击「一键导入所有 Fork 仓库」可自动导入当前账号下所有 Fork 仓库。
+访问 `http://localhost:3846`。添加仓库时 Owner 可留空（用 Token 用户名）；支持单仓同步、批量同步、一键导入所有 Fork。
 
 ---
 
-## 部署到 Cloudflare Workers（可选）
+## 部署到 Cloudflare Workers
 
-项目提供了一个 `worker.js`，可以将后端迁移到 Cloudflare Workers，无需自建服务器。
+部署后**打开 Worker 链接即见前端**，同一域名下 `/api/*` 为接口，无需改代码。
 
-### 1）配置 KV 与环境变量
+### 配置在哪（务必区分）
 
-在 Cloudflare Dashboard 或 `wrangler.toml` 中配置：
+| 配置项 | 位置 |
+|--------|------|
+| `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_KV_NAMESPACE_ID` | **GitHub 仓库** → Settings → Secrets and variables → **Actions**（CI 部署用；KV 的 id 在 Cloudflare 创建 KV 后复制过来，部署时自动绑定到 Worker） |
+| `GITHUB_TOKEN` | **Cloudflare** → Workers & Pages → 该 Worker → Settings → **Variables and Secrets**（Worker 调 GitHub API 用，勿放进 GitHub） |
 
-- KV Namespace（示例）：
+无需改 wrangler.toml，也无需在 Cloudflare 里给 Worker 手动加 KV 绑定：在 Cloudflare 创建 KV 后，把 id 填到 GitHub Secret 即可，部署时会自动绑定。
 
-```toml
-[[kv_namespaces]]
-binding = "REPOS_KV"
-id = "your-kv-id"
-```
+### Fork 后自动部署
 
-- 环境变量：
+1. Fork 本仓库。
+2. **Cloudflare**：拿 [Account ID](https://dash.cloudflare.com/)；建 [API Token](https://dash.cloudflare.com/profile/api-tokens)（Workers Scripts: Edit、KV: Edit）；在 **Workers KV** 里创建命名空间（或本地 `npx wrangler kv:namespace create REPOS_KV`），复制生成的 **id**。
+3. **GitHub**：Fork 仓库 → Settings → Secrets and variables → Actions，添加 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_KV_NAMESPACE_ID`（上一步的 id）。
+4. 首次部署成功后，在 **Cloudflare** 为该 Worker 添加 Secret `GITHUB_TOKEN`。
+5. 推送到 `main` 即触发部署。
 
-```toml
-[vars]
-GITHUB_TOKEN = "你的 GitHub Token"
-```
-
-### 2）使用 `worker.js` 作为入口
-
-将 Workers 服务入口指向 `worker.js`，即可提供与本地 `server.js` 等价的后端 API。
-
-### 3）前端接入
-
-- 如果前端和 Workers 同域（例如 Cloudflare Pages + Functions），`public/app.js` 中的 `const API = ''` 保持不变。
-- 如果前端在其他域名：
-  - 将 `const API` 改成 Workers 的地址前缀，例如：
-
-    ```js
-    const API = 'https://your-worker.example.workers.dev';
-    ```
+本地部署：需把 KV id 写进 wrangler.toml 或通过环境变量在部署前注入，再 `npx wrangler deploy`。
 
 ---
 
 ## 项目结构
 
-```text
-.
-├── server.js       # 本地 Node 版后端（Express）
-├── worker.js       # Cloudflare Workers 版后端（使用 KV 存储）
-├── sync.js         # 调用 GitHub merge-upstream API
-├── store.js        # 本地 JSON 存储（Node 版本使用）
-├── data/
-│   └── repos.json  # 持久化的仓库配置（Node 版本自动生成）
-├── public/
-│   ├── index.html  # 前端页面
-│   ├── style.css   # 页面样式
-│   └── app.js      # 前端逻辑 & API 调用
-├── .env            # 本地环境变量（勿提交）
-└── package.json
+```
+server.js / worker.js   # 本地 Node 后端 / Workers 后端（KV）
+sync.js, store.js       # 同步逻辑、本地存储
+public/                 # 前端（部署时与 Worker 一起发布）
+.github/workflows/      # 推 main 自动部署
 ```
 
 ---
 
-## API 概览
+## API 简表
 
-| 方法 | 路径 | 说明 | 备注 |
-|------|------|------|------|
-| `GET` | `/api/repos` | 获取当前配置的所有仓库列表 | 返回本地存储中的仓库数组，用于页面列表展示 |
-| `POST` | `/api/repos` | 添加单个仓库 | Body: `{ owner?, repo, branch?, label? }`；`owner` 为空时会用当前 Token 对应 GitHub 用户名；添加后会自动补齐 Fork / 上游的时间与最新 commit 信息 |
-| `DELETE` | `/api/repos/:id` | 删除本地列表中的一个仓库 | 仅删除本地配置，不会删除 GitHub 上的仓库，也不会取消 Fork |
-| `PATCH` | `/api/repos/:id` | 更新仓库的分支 / 显示名称等信息 | Body: `{ branch?, label? }`，用于修改本地配置 |
-| `GET` | `/api/current-user` | 获取当前 `GITHUB_TOKEN` 对应的 GitHub 用户信息 | 返回 `{ ok, login, name }`，前端用来自动填充添加表单的 Owner 输入框 |
-| `POST` | `/api/sync/:id` | 同步单个仓库到上游 | 调用 GitHub Merge Upstream API；当分支已是最新或未落后时返回「当前主分支已是最新」提示 |
-| `POST` | `/api/sync-all` | 一键批量同步所有已配置仓库 | 依次对所有仓库调用单仓库同步，返回每个仓库的同步结果数组 |
-| `POST` | `/api/import-forks` | 一键导入当前账号下所有 Fork 仓库 | 基于当前 Token 调用 `GET /user/repos`，筛选 `fork == true` 的仓库，自动写入本地列表；为本次新增的仓库补齐 Fork / 上游时间和最新 commit 信息 |
-| `POST` | `/api/refresh-meta` | 刷新所有仓库的 Fork / 上游元信息 | 为每个仓库刷新 push 时间和最新 commit 信息；遇到 GitHub 已删除或已取消 Fork 的仓库会自动从本地列表移除 |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/repos` | 仓库列表 |
+| POST | `/api/repos` | 添加仓库（body: `owner?`, `repo`, `branch?`, `label?`） |
+| DELETE/PATCH | `/api/repos/:id` | 删除/更新仓库 |
+| GET | `/api/current-user` | 当前 GitHub 用户 |
+| POST | `/api/sync/:id` | 同步单仓 |
+| POST | `/api/sync-all` | 批量同步 |
+| POST | `/api/import-forks` | 一键导入所有 Fork |
+| POST | `/api/refresh-meta` | 刷新元信息并清理已删除/Fork 取消的仓库 |
 
 ---
-
-## License
 
 MIT
