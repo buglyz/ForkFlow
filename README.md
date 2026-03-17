@@ -80,23 +80,36 @@ npm start
 OAuth App 创建入口：[GitHub Developer Settings → OAuth Apps](https://github.com/settings/developers)  
 回调地址（必须匹配你的 Worker 域名）：`https://你的 Worker 域名/api/auth/callback`
 
-### Fork 后自动部署
+### Fork 后自动部署（一步步来）
 
-1. Fork 本仓库。
-2. **Cloudflare**：
+1. **Fork 本仓库**  
+   在 GitHub 上点 Fork，把项目 fork 到你自己的账号下。
 
-- 拿 [Account ID](https://dash.cloudflare.com/)；
-- 建 [API Token](https://dash.cloudflare.com/profile/api-tokens)（Workers Scripts: Edit、KV: Edit）；
-- 在 **Workers KV** 里创建命名空间（或本地 `npx wrangler kv:namespace create REPOS_KV`），复制生成的 **id**。
+2. **Cloudflare 侧准备（一次性）**
+   - 在 [Dashboard](https://dash.cloudflare.com/) 顶部复制你的 **Account ID**。
+   - 在 [API Tokens](https://dash.cloudflare.com/profile/api-tokens) 创建一个 Token，至少勾选：
+     - *Account → Cloudflare Workers KV Storage*: Edit
+     - *Account → Cloudflare Workers Scripts*: Edit
+   - 在 Workers KV 中创建一个命名空间（名字随意，例如 `REPOS_KV`），复制生成的 **namespace id**。
 
-1. **GitHub**：
+3. **GitHub 仓库 Secrets 配置**
+   在你 Fork 后的仓库 → **Settings → Secrets and variables → Actions**，添加：
+   - 必填：
+     - `CLOUDFLARE_API_TOKEN`
+     - `CLOUDFLARE_ACCOUNT_ID`
+     - `CLOUDFLARE_KV_NAMESPACE_ID`
+   - 鉴权（二选一，至少选一种）：
+     - `GH_TOKEN`（PAT 方案），或  
+     - `GH_OAUTH_CLIENT_ID` + `GH_OAUTH_CLIENT_SECRET`（OAuth 登录方案，见上文表格）
 
-- Fork 仓库 → Settings → Secrets and variables → Actions，添加必填的 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_KV_NAMESPACE_ID`；
-- 再二选一：配 `**GH_TOKEN`**（PAT）或配 `**GH_OAUTH_CLIENT_ID` + `GH_OAUTH_CLIENT_SECRET**`（OAuth 登录，见上表）。
+4. **推送到 main 触发部署**  
+   从本地或 GitHub 网页直接向 `main` 分支推送/合并，GitHub Actions 会自动：
+   - 构建前端静态资源；
+   - 把 `wrangler.toml` 中的 KV id 用 Secrets 注入；
+   - 使用 Wrangler 将 Worker（含前端）部署到 Cloudflare。
 
-1. 推送到 `main` 即触发部署。
-
-本地部署：先运行 `node build-embed-assets.js` 生成前端内联文件，再在 wrangler.toml 填好 account_id 与 KV id，执行 `npx wrangler deploy`。
+本地部署（Node 版）：只需 `npm install && npm start`，会直接使用 `public/` 下的静态文件。  
+Workers 部署：部署前在仓库根目录运行一次 `node build-embed-assets.js` 生成内联静态资源文件，然后在 `wrangler.toml` 填好 `account_id` 与 KV id，执行 `npx wrangler deploy`。
 
 ---
 
