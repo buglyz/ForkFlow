@@ -567,6 +567,8 @@ document.getElementById('loginBtn')?.addEventListener('click', () => {
 document.getElementById('logoutBtn')?.addEventListener('click', () => {
   clearStoredToken();
   updateAuthUI();
+  const ownerInput = document.getElementById('owner');
+  if (ownerInput) ownerInput.value = '';
   allReposCache = [];
   renderList(allReposCache);
   showToast('已退出登录', 'info');
