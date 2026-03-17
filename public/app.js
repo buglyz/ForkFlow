@@ -594,11 +594,16 @@ document.getElementById('filterBehindBtn')?.addEventListener('click', () => {
   if (!ownerInput) return;
   try {
     const { ok, login } = await api('/api/current-user');
-    if (ok && login && !ownerInput.value) {
-      ownerInput.value = login;
+    if (ok) {
+      if (login && !ownerInput.value) {
+        ownerInput.value = login;
+      }
+      // 只有在当前有有效 GitHub 凭证时才自动加载列表 & 后台刷新
+      await loadRepos();
+      refreshMetaInBackground();
     }
   } catch {
-    // 获取失败时静默忽略（未登录或 401），保持输入框为空
+    // 获取失败时静默忽略（未登录或 401），保持输入框为空且不加载列表
   }
 })();
 
@@ -718,6 +723,3 @@ if (importForksBtn) {
     }
   });
 }
-
-loadRepos();
-refreshMetaInBackground();
