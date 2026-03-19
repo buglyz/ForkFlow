@@ -14,14 +14,37 @@ function githubHeaders(token, extra = {}) {
 }
 
 // ---------- KV 存储封装（替代本地 repos.json） ----------
-async function readRepos(env) {
-  const raw = await env.REPOS_KV.get('repos', 'json');
-  if (!raw) return [];
+// username 不为空时用 repos:${username} 做用户隔离；为空时退回全局 key（env token 场景）
+function reposKvKey(username) {
+  return username ? `repos:${username.toLowerCase()}` : 'repos';
+}
+
+// 首次以用户隔离 key 访问时，若该 key 为空，则从旧全局 key 里把属于该用户的仓库迁移过来
+async function readRepos(env, username) {
+  const key = reposKvKey(username);
+  const raw = await env.REPOS_KV.get(key, 'json');
+  if (raw && Array.isArray(raw) && raw.length > 0) return raw;
+
+  // 尝试从旧全局 key 迁移（向下兼容）
+  if (username) {
+    const legacy = await env.REPOS_KV.get('repos', 'json');
+    if (legacy && Array.isArray(legacy)) {
+      const mine = legacy.filter(
+        (r) => (r.owner || '').toLowerCase() === username.toLowerCase()
+      );
+      if (mine.length > 0) {
+        // 迁移写入新 key；不删旧全局 key，避免其他用户数据丢失
+        await env.REPOS_KV.put(key, JSON.stringify(mine));
+        return mine;
+      }
+    }
+  }
+
   return Array.isArray(raw) ? raw : [];
 }
 
-async function writeRepos(env, repos) {
-  await env.REPOS_KV.put('repos', JSON.stringify(repos));
+async function writeRepos(env, repos, username) {
+  await env.REPOS_KV.put(reposKvKey(username), JSON.stringify(repos));
 }
 
 function nextId(repos) {
@@ -29,12 +52,12 @@ function nextId(repos) {
   return String(max + 1);
 }
 
-async function listRepos(env) {
-  return readRepos(env);
+async function listRepos(env, username) {
+  return readRepos(env, username);
 }
 
-async function addRepo(env, owner, repo, branch = 'main', label = '') {
-  const repos = await readRepos(env);
+async function addRepo(env, owner, repo, branch = 'main', label = '', username) {
+  const repos = await readRepos(env, username);
   const existing = repos.find(
     (r) =>
       r.owner.toLowerCase() === owner.toLowerCase() &&
@@ -46,12 +69,12 @@ async function addRepo(env, owner, repo, branch = 'main', label = '') {
   const id = nextId(repos);
   const item = { id, owner, repo, branch, label: label || `${owner}/${repo}` };
   repos.push(item);
-  await writeRepos(env, repos);
+  await writeRepos(env, repos, username);
   return { ok: true, item };
 }
 
-async function addMany(env, reposToAdd) {
-  const current = await readRepos(env);
+async function addMany(env, reposToAdd, username) {
+  const current = await readRepos(env, username);
   let repos = [...current];
   let changed = 0;
   for (const r of reposToAdd) {
@@ -73,32 +96,32 @@ async function addMany(env, reposToAdd) {
     changed++;
   }
   if (changed > 0) {
-    await writeRepos(env, repos);
+    await writeRepos(env, repos, username);
   }
   return { ok: true, added: changed, total: repos.length };
 }
 
-async function removeRepo(env, id) {
-  const current = await readRepos(env);
+async function removeRepo(env, id, username) {
+  const current = await readRepos(env, username);
   const repos = current.filter((r) => r.id !== id);
   if (repos.length === current.length) {
     return { ok: false, message: '未找到该仓库' };
   }
-  await writeRepos(env, repos);
+  await writeRepos(env, repos, username);
   return { ok: true };
 }
 
-async function getRepo(env, id) {
-  const repos = await readRepos(env);
+async function getRepo(env, id, username) {
+  const repos = await readRepos(env, username);
   return repos.find((r) => r.id === id);
 }
 
-async function updateRepo(env, id, updates) {
-  const repos = await readRepos(env);
+async function updateRepo(env, id, updates, username) {
+  const repos = await readRepos(env, username);
   const idx = repos.findIndex((r) => r.id === id);
   if (idx === -1) return { ok: false, message: '未找到该仓库' };
   repos[idx] = { ...repos[idx], ...updates };
-  await writeRepos(env, repos);
+  await writeRepos(env, repos, username);
   return { ok: true, item: repos[idx] };
 }
 
@@ -209,12 +232,38 @@ function getToken(request, env) {
   return (env.GITHUB_TOKEN || '').trim();
 }
 
+// 判断当前请求是否使用 OAuth Token（浏览器请求头带的）；env token 为 false
+function isOAuthRequest(request) {
+  const auth = request.headers.get('Authorization') || '';
+  return auth.startsWith('Bearer ') && !!auth.slice(7).trim();
+}
+
+// 获取当前 OAuth 用户的 GitHub login（仅 OAuth 场景调用，env token 返回 null）
+async function fetchUserLogin(token) {
+  try {
+    const r = await fetch('https://api.github.com/user', {
+      headers: githubHeaders(token),
+    });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => ({}));
+    return (d.login || '').toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- 主处理 ----------
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const { pathname, searchParams } = url;
     const token = getToken(request, env);
+
+    // OAuth 场景下获取当前用户 login，用于 KV 数据隔离
+    // env token 场景（非 OAuth）username = null，使用全局 'repos' key
+    const username = (token && isOAuthRequest(request))
+      ? await fetchUserLogin(token)
+      : null;
 
     try {
       // ---------- OAuth 登录（可选，替代 GH_TOKEN 变量）----------
@@ -267,7 +316,7 @@ export default {
 
       // 获取仓库列表
       if (request.method === 'GET' && pathname === '/api/repos') {
-        const repos = await listRepos(env);
+        const repos = await listRepos(env, username);
         return jsonResponse({ ok: true, data: repos });
       }
 
@@ -348,7 +397,7 @@ export default {
           owner = uData.login || owner;
         }
 
-        const result = await addRepo(env, owner, repo, branch || 'main', label);
+        const result = await addRepo(env, owner, repo, branch || 'main', label, username);
         if (!result.ok) {
           return jsonResponse(result, { status: 400 });
         }
@@ -439,7 +488,7 @@ export default {
                 upstreamLastCommitSha,
                 upstreamLastCommitMessage,
                 isBehindUpstream,
-              });
+              }, username);
             }
           }
         } catch {
@@ -455,7 +504,7 @@ export default {
 
         // 获取单个
         if (request.method === 'GET') {
-          const repo = await getRepo(env, id);
+          const repo = await getRepo(env, id, username);
           if (!repo) {
             return jsonResponse({ ok: false, message: '未找到该仓库' }, { status: 404 });
           }
@@ -464,7 +513,7 @@ export default {
 
         // 删除
         if (request.method === 'DELETE') {
-          const result = await removeRepo(env, id);
+          const result = await removeRepo(env, id, username);
           if (!result.ok) {
             return jsonResponse(result, { status: 404 });
           }
@@ -475,7 +524,7 @@ export default {
         if (request.method === 'PATCH') {
           const body = await request.json().catch(() => ({}));
           const { branch, label } = body || {};
-          const result = await updateRepo(env, id, { branch, label });
+          const result = await updateRepo(env, id, { branch, label }, username);
           if (!result.ok) {
             return jsonResponse(result, { status: 404 });
           }
@@ -492,7 +541,7 @@ export default {
           );
         }
         const id = pathname.split('/').pop();
-        const repo = await getRepo(env, id);
+        const repo = await getRepo(env, id, username);
         if (!repo) {
           return jsonResponse({ ok: false, message: '未找到该仓库' }, { status: 404 });
         }
@@ -578,7 +627,7 @@ export default {
                 upstreamPushedAt,
                 upstreamLastCommitSha,
                 upstreamLastCommitMessage,
-              });
+              }, username);
             }
           } catch {
             // 元信息刷新失败不影响同步结果
@@ -596,7 +645,7 @@ export default {
             { status: 401 }
           );
         }
-        const repos = await listRepos(env);
+        const repos = await listRepos(env, username);
         if (repos.length === 0) {
           return jsonResponse({ ok: true, data: [], message: '暂无配置的仓库' });
         }
@@ -612,7 +661,7 @@ export default {
             { status: 401 }
           );
         }
-        const beforeRepos = await listRepos(env);
+        const beforeRepos = await listRepos(env, username);
 
         const perPage = 100;
         let page = 1;
@@ -642,7 +691,7 @@ export default {
 
         const forks = all.filter((r) => r.fork);
         if (forks.length === 0) {
-          const current = await listRepos(env);
+          const current = await listRepos(env, username);
           return jsonResponse({
             ok: true,
             message: '未找到任何 fork 仓库',
@@ -657,11 +706,11 @@ export default {
           label: r.full_name,
         }));
 
-        const result = await addMany(env, toAdd);
+        const result = await addMany(env, toAdd, username);
 
         // 为本次新加入的仓库补充元信息（只查新增的，避免整库刷新）
         if (result.added > 0) {
-          const afterRepos = await listRepos(env);
+          const afterRepos = await listRepos(env, username);
           const beforeIds = new Set(beforeRepos.map((r) => r.id));
           const newlyAdded = afterRepos.filter((r) => !beforeIds.has(r.id));
 
@@ -753,7 +802,7 @@ export default {
                 upstreamLastCommitSha,
                 upstreamLastCommitMessage,
                 isBehindUpstream,
-              });
+              }, username);
             } catch {
               // ignore 单个失败
             }
@@ -776,7 +825,7 @@ export default {
           );
         }
 
-        const repos = await listRepos(env);
+        const repos = await listRepos(env, username);
         if (repos.length === 0) {
           return jsonResponse({ ok: true, message: '暂无配置的仓库', data: [] });
         }
@@ -798,7 +847,7 @@ export default {
             );
             if (!infoRes.ok) {
               if (infoRes.status === 404) {
-                await removeRepo(env, r.id);
+                await removeRepo(env, r.id, username);
                 results.push({
                   id: r.id,
                   owner: r.owner,
@@ -824,7 +873,7 @@ export default {
             const info = await infoRes.json();
 
             if (!info.fork || !info.parent) {
-              await removeRepo(env, r.id);
+              await removeRepo(env, r.id, username);
               results.push({
                 id: r.id,
                 owner: r.owner,
@@ -866,7 +915,7 @@ export default {
               upstreamFullName,
               upstreamPushedAt,
               isBehindUpstream,
-            });
+            }, username);
 
             results.push({
               id: r.id,
