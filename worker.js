@@ -776,7 +776,6 @@ export default {
           );
         }
 
-        // 简化：不做复杂节流，由前端控制调用频率；如需可加 env 变量控制
         const repos = await listRepos(env);
         if (repos.length === 0) {
           return jsonResponse({ ok: true, message: '暂无配置的仓库', data: [] });
@@ -784,9 +783,14 @@ export default {
 
         const headers = githubHeaders(token);
 
+        // Worker 有执行时间限制：分批处理，避免一次刷新 100+ 仓库超时导致“只刷新了前几个”
+        const cursor = Math.max(0, parseInt(searchParams.get('cursor') || '0', 10) || 0);
+        const limitRaw = parseInt(searchParams.get('limit') || '20', 10);
+        const limit = Math.min(50, Math.max(5, Number.isNaN(limitRaw) ? 20 : limitRaw));
+        const slice = repos.slice(cursor, cursor + limit);
         const results = [];
 
-        for (const r of repos) {
+        for (const r of slice) {
           try {
             const infoRes = await fetch(
               `${GITHUB_API}/repos/${r.owner}/${r.repo}`,
@@ -834,48 +838,10 @@ export default {
             const forkPushedAt = info.pushed_at || null;
             const forkBranch = r.branch || info.default_branch || 'main';
 
-            let forkLastCommitSha = null;
-            let forkLastCommitMessage = null;
-            try {
-              const cRes = await fetch(
-                `${GITHUB_API}/repos/${r.owner}/${r.repo}/commits?per_page=1&sha=${forkBranch}`,
-                { headers }
-              );
-              if (cRes.ok) {
-                const commits = await cRes.json();
-                if (Array.isArray(commits) && commits[0]) {
-                  forkLastCommitSha = commits[0].sha || null;
-                  forkLastCommitMessage =
-                    (commits[0].commit && commits[0].commit.message) || null;
-                }
-              }
-            } catch {
-              // ignore
-            }
-
             let upstreamFullName = info.parent.full_name;
             let upstreamPushedAt = info.parent.pushed_at || null;
             let upstreamBranch = r.branch || info.parent.default_branch || 'main';
-            let upstreamLastCommitSha = null;
-            let upstreamLastCommitMessage = null;
             let isBehindUpstream = false;
-
-            try {
-              const uRes = await fetch(
-                `${GITHUB_API}/repos/${info.parent.owner.login}/${info.parent.name}/commits?per_page=1&sha=${upstreamBranch}`,
-                { headers }
-              );
-              if (uRes.ok) {
-                const uCommits = await uRes.json();
-                if (Array.isArray(uCommits) && uCommits[0]) {
-                  upstreamLastCommitSha = uCommits[0].sha || null;
-                  upstreamLastCommitMessage =
-                    (uCommits[0].commit && uCommits[0].commit.message) || null;
-                }
-              }
-            } catch {
-              // ignore
-            }
 
             // compare 判断是否落后上游（用于前端“需同步”状态）
             try {
@@ -897,12 +863,8 @@ export default {
 
             await updateRepo(env, r.id, {
               forkPushedAt,
-              forkLastCommitSha,
-              forkLastCommitMessage,
               upstreamFullName,
               upstreamPushedAt,
-              upstreamLastCommitSha,
-              upstreamLastCommitMessage,
               isBehindUpstream,
             });
 
@@ -912,12 +874,9 @@ export default {
               repo: r.repo,
               ok: true,
               forkPushedAt,
-              forkLastCommitSha,
-              forkLastCommitMessage,
               upstreamFullName,
               upstreamPushedAt,
-              upstreamLastCommitSha,
-              upstreamLastCommitMessage,
+              isBehindUpstream,
             });
           } catch (err) {
             results.push({
@@ -930,9 +889,15 @@ export default {
           }
         }
 
+        const nextCursor = cursor + slice.length;
         return jsonResponse({
           ok: true,
-          message: '元信息刷新完成',
+          message: nextCursor >= repos.length ? '元信息刷新完成' : '元信息刷新中…',
+          cursor,
+          limit,
+          processed: slice.length,
+          total: repos.length,
+          nextCursor: nextCursor >= repos.length ? null : nextCursor,
           data: results,
         });
       }

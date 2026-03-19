@@ -655,12 +655,35 @@ if (refreshMetaBtn) {
     }
 
     try {
-      const { message } = await api('/api/refresh-meta', {
-        method: 'POST',
-        signal: controller.signal,
-      });
+      let cursor = 0;
+      const limit = 20;
+      let lastMessage = '';
+
+      // Worker 端会分批刷新；这里循环跑完所有批次，避免只刷新前几个仓库
+      // Node 端若返回不含 nextCursor，也会在第一轮直接结束
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const qs = `?cursor=${cursor}&limit=${limit}`;
+        const result = await api('/api/refresh-meta' + qs, {
+          method: 'POST',
+          signal: controller.signal,
+        });
+        lastMessage = result.message || lastMessage;
+
+        if (cancelled) return;
+
+        if (typeof result.total === 'number' && typeof result.processed === 'number') {
+          const done = Math.min(result.total, cursor + result.processed);
+          showLoadingModal(`正在刷新仓库信息…（${done}/${result.total}）`);
+        }
+
+        if (result.nextCursor === null || result.nextCursor === undefined) {
+          break;
+        }
+        cursor = Number(result.nextCursor) || 0;
+      }
       if (cancelled) return;
-      showToast(message || '刷新完成', 'success');
+      showToast(lastMessage || '刷新完成', 'success');
       loadRepos();
     } catch (e) {
       if (cancelled || e.name === 'AbortError') return;
