@@ -794,12 +794,56 @@ code {
 }
 
 @media (max-width: 640px) {
+  /* 移动端：把 github 头像/用户名/退出按钮放到“一键批量同步”上方 */
+  .actions {
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 1.15rem;
+  }
+
+  .actions-left {
+    order: 2;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    align-items: center;
+  }
+
   .form {
     grid-template-columns: 1fr;
   }
 
+  /* 移动端：上游/当前两列改为垂直居中 */
+  .table th:nth-child(1),
+  .table td:nth-child(1),
+  .table th:nth-child(2),
+  .table td:nth-child(2) {
+    vertical-align: middle;
+  }
+
   .cell-actions {
+    /* 移动端允许按钮换行，避免按钮挤出单元格 */
     flex-wrap: wrap;
+  }
+
+  /* 移动端：操作列 sticky 需要更高层级与遮挡，避免横向滚动时透出内容 */
+  .table th:nth-child(4),
+  .table td:nth-child(4) {
+    z-index: 6;
+    /* 用更不透明的底色，避免 rgba 让底下内容“透出来” */
+    background: rgba(18, 27, 54, 1);
+    right: -4px;
+    /* 避免移动端 sticky 重排时出现闪烁 */
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    box-shadow: -6px 0 14px rgba(2, 6, 18, 0.46);
+  }
+
+  /* 避免 hover 规则覆盖上面的背景透明度/颜色，导致滚动时抖动或透出 */
+  .table tbody tr:hover:not(.empty) td:nth-child(4) {
+    background: rgba(18, 27, 54, 1);
   }
 
   .actions-left .btn,
@@ -809,8 +853,28 @@ code {
   }
 
   .auth-area {
-    justify-content: stretch;
-    flex-wrap: wrap;
+    justify-content: center;
+    flex-wrap: nowrap;
+    order: 1;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+  }
+
+  .auth-user {
+    justify-content: center;
+  }
+
+  .auth-name {
+    text-align: center;
+  }
+
+  /* 移动端：让退出/登录这类 btn-sm 跟“一键批量同步”保持高度接近 */
+  .auth-area .btn.btn-sm {
+    padding: 0.5rem 0.95rem;
+    font-size: 0.88rem;
   }
 
   .pagination {
