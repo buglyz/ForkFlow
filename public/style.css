@@ -555,13 +555,18 @@ code {
   white-space: nowrap;
 }
 
+/* 分支名单元格：与多行「仓库名 + commit」行高对齐时垂直居中 */
+.table th:nth-child(3),
+.table td:nth-child(3) {
+  vertical-align: middle;
+}
+
 .table th:nth-child(4),
 .table td:nth-child(4) {
   width: 1%;
   white-space: nowrap;
   position: sticky;
   right: 0;
-  background: rgba(18, 27, 54, 0.92);
   box-shadow: -8px 0 16px rgba(2, 6, 18, 0.46);
   vertical-align: middle;
 }
@@ -569,10 +574,6 @@ code {
 .table td:nth-child(4) {
   position: sticky;
   right: 0;
-}
-
-.table tbody tr:hover:not(.empty) td:nth-child(4) {
-  background: rgba(33, 48, 90, 0.96);
 }
 
 .cell-status {
